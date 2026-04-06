@@ -12,9 +12,24 @@ modal deploy modal_llm_server/llama_cpp_inference.py
 
 import modal
 
-MODEL_REPO = "bartowski/Qwen_Qwen3.5-27B-GGUF"
-MODEL_FILE = "Qwen_Qwen3.5-27B-Q4_K_M.gguf"
-SERVED_MODEL_NAME = "bartowski/Qwen3.5-27B-Q4_K_M"
+#MODEL_REPO = "bartowski/Qwen_Qwen3.5-27B-GGUF"
+#SERVED_MODEL_NAME = "bartowski/Qwen3.5-27B-Q4_K_M"
+#MODEL_FILE = "Qwen_Qwen3.5-27B-Q4_K_M.gguf"
+#SERVED_MODEL_NAME = "bartowski/Qwen3.5-27B-Q5_K_M"
+#MODEL_FILE = "Qwen_Qwen3.5-27B-Q5_K_M.gguf"
+#SERVED_MODEL_NAME = "bartowski/Qwen3.5-27B-Q5_K_L"
+#MODEL_FILE = "Qwen_Qwen3.5-27B-Q5_K_L.gguf"
+#SERVED_MODEL_NAME = "bartowski/Qwen3.5-27B-Q6_K_L"
+#MODEL_FILE = "Qwen_Qwen3.5-27B-Q6_K_L.gguf"
+
+
+
+MODEL_REPO = "unsloth/Qwen3.5-27B-GGUF"
+SERVED_MODEL_NAME = "unsloth/Qwen3.5-27B-UD-Q6_K_XL"
+MODEL_FILE = "Qwen3.5-27B-UD-Q6_K_XL.gguf"
+
+
+
 # MODEL_REVISION = "b7ca741b86de18df552fd2cc952861e04621a4bd"
 
 
@@ -23,11 +38,11 @@ IMAGE="ghcr.io/ggml-org/llama.cpp:server-cuda13"
 GPU_TYPE="A100-80GB"
 N_GPU=1
 MAX_MODEL_LEN=16000
-MAX_NUM_SEQS=4
+MAX_NUM_SEQS=8
 
 
 TIMEOUT_S = 10 * 60  # how long should we wait for container start?
-SCALEDOWN_S = 5 * 60  # how long should we stay up with no requests?
+SCALEDOWN_S = 1 * 60  # how long should we stay up with no requests?
 PORT = 8000
 
 """
@@ -120,12 +135,20 @@ def serve():
         "--port", str(PORT),
         "--alias", SERVED_MODEL_NAME,
         "--jinja",
-        "--reasoning", "auto",
-        "--ctx-size", str(MAX_MODEL_LEN),
+        "--ctx-size", str(MAX_MODEL_LEN * MAX_NUM_SEQS),
         "--n-gpu-layers", "all",
         "--parallel", str(MAX_NUM_SEQS),
         "--flash-attn", "on",
         "--no-mmproj",
+        "-b", "4096",
+        "-ub", "1024",
+        "--temp", "0.7",
+        "--top-p", "0.8",
+        "--top-k", "20",
+        "--min-p", "0.0",
+        "--presence-penalty", "1.5",
+        "--repeat-penalty", "1.0",
+        "--chat-template-kwargs", '{"enable_thinking": false}',
     ]
 
     print("Starting:", " ".join(cmd))
