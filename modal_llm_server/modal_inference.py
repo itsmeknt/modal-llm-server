@@ -10,11 +10,20 @@ Then deploy via:
 modal deploy modal_llm_server/modal_inference.py
 """
 
+# TODO(Kevin): Modal single-GPU memory snapshots
+
+
 from abc import ABC, abstractmethod
+import asyncio
+from collections.abc import Mapping
 from pathlib import PurePosixPath
+import subprocess
 from typing import ClassVar, Final, override
 
-
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
+import httpx
 import modal
 
 
@@ -41,11 +50,68 @@ import modal
 #MODEL_REPO = "google/gemma-4-31B-it"
 #SERVED_MODEL_NAME = "google/gemma-4-31B-it-BF16"
 #MODEL_FILE: str | None = None
+#MAX_MODEL_LEN=128000
+#MAX_NUM_SEQS=8
 
 
-MODEL_REPO = "nvidia/Gemma-4-31B-IT-NVFP4"
-SERVED_MODEL_NAME = "nvidia/Gemma-4-31B-IT-NVFP4"
+#MODEL_REPO = "nvidia/Gemma-4-31B-IT-NVFP4"
+#SERVED_MODEL_NAME = "nvidia/Gemma-4-31B-IT-NVFP4"
+#MODEL_FILE: str | None = None
+#MAX_MODEL_LEN=128000
+#MAX_NUM_SEQS=8
+
+
+
+"""
+MODEL_REPO = "Qwen/Qwen3.5-122B-A10B-FP8"
+SERVED_MODEL_NAME = "Qwen/Qwen3.5-122B-A10B-FP8"
 MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=64
+"""
+
+
+"""
+MODEL_REPO = "QuantTrio/Qwen3.5-122B-A10B-AWQ"
+SERVED_MODEL_NAME = "QuantTrio/Qwen3.5-122B-A10B-AWQ"
+MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=64
+"""
+
+"""
+MODEL_REPO = "Intel/Qwen3.5-122B-A10B-int4-AutoRound"
+SERVED_MODEL_NAME = "Intel/Qwen3.5-122B-A10B-int4-AutoRound"
+MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=64
+"""
+
+
+"""
+MODEL_REPO = "Sehyo/Qwen3.5-122B-A10B-NVFP4"
+SERVED_MODEL_NAME = "Sehyo/Qwen3.5-122B-A10B-NVFP4"
+MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=64
+"""
+
+
+
+MODEL_REPO = "nvidia/Qwen3.5-397B-A17B-NVFP4"
+SERVED_MODEL_NAME = "nvidia/Qwen3.5-397B-A17B-NVFP4"
+MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=32
+
+
+
+
+
+
+
+
+
 
 
 
@@ -53,9 +119,8 @@ MODEL_FILE: str | None = None
 # INFRA CONFIG
 GPU_TYPE="B200+"
 #GPU_TYPE="A100-80GB"
-N_GPU=1
-MAX_MODEL_LEN=128000
-MAX_NUM_SEQS=16
+N_GPU=2
+PREWARM_TIMEOUT_S = 60 * 60  # how long should we wait for the prewarm function to complete?
 TIMEOUT_S = 20 * 60  # how long should we wait for container start?
 SCALEDOWN_S = 1 * 60  # how long should we stay up with no requests?
 PORT = 8000
@@ -71,7 +136,7 @@ We want the cache file structure to look something like this:
 """
 HF_CACHE_ROOT_PATH = f"/root/.cache/huggingface"
 HF_CACHE_MODEL_DIR = f"{HF_CACHE_ROOT_PATH}/{MODEL_REPO}"
-HF_CACHE_MODEL_FILE = f"{HF_CACHE_MODEL_DIR}/{MODEL_FILE}" if MODEL_FILE is not None else ""    # pyright: ignore[reportUnnecessaryComparison]
+HF_CACHE_MODEL_FILE = f"{HF_CACHE_MODEL_DIR}/{MODEL_FILE}" if MODEL_FILE is not None else ""
 HF_CACHE_VOL = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 
 
@@ -176,12 +241,12 @@ class VLLMEngine(AbstractEngine):
     @override
     def get_base_image(self) -> str:
         repo = normalize(MODEL_REPO)
-        if "qwen35" in repo.lower():
-            return "vllm/vllm-openai:qwen3_5-cu130"
-        elif "gemma4" in repo.lower():
+        #if "qwen35" in repo.lower():
+        #    return "vllm/vllm-openai:qwen3_5-cu130"
+        if "gemma4" in repo.lower():
             return "vllm/vllm-openai:gemma4-cu130"
         else:
-            return "vllm/vllm-openai:latest-cu130"
+            return "vllm/vllm-openai:cu130-nightly"
 
     @override
     def prewarm_container(self) -> None:
@@ -206,19 +271,40 @@ class VLLMEngine(AbstractEngine):
             "--enable-prefix-caching",
             "--generation-config", "vllm",
             "--tensor-parallel-size", str(N_GPU),
-
         ]
-    
-        repo = normalize(MODEL_REPO)
-        if "qwen35" in repo.lower():
-            # NOTE(Kevin): vllm bug with Qwen3.5 models, need to force
-            # FLASH_ATTN and language-model-only or the quality degrades
+        
+        repo = normalize(MODEL_REPO).lower()
+        if "qwen35" in repo:
             cmd.extend([
                 "--reasoning-parser", "qwen3",
-                 "--language-model-only",
-                 "--attention-backend", "FLASH_ATTN"
+                "--language-model-only",
+                # "--enable-auto-tool-choice",
+                # "--tool-call-parser", "qwen3_coder",
+                # "--speculative-config", "{\"method\":\"mtp\",\"num_speculative_tokens\":1}",
             ])
-        elif "gemma4" in repo.lower():
+
+            if "nvfp4" not in repo:
+                # MTP seems to break with nvfp4, so only add it if not
+                cmd.extend([
+                    "--speculative-config.method", "mtp",
+                    "--speculative-config.num_speculative_tokens", "1",
+                ])
+
+            
+            """
+            # NOTE(Kevin): vllm bug with Qwen3.5 models, need to force
+            # FLASH_ATTN and language-model-only or the quality degrades
+            if "27b" in repo:
+                cmd.extend([
+                     "--attention-backend", "FLASH_ATTN"
+                ])
+            """
+
+            if "intel" in repo and "int4autoround" in repo:
+                cmd.extend([
+                    "--tokenizer", "Qwen/Qwen3.5-122B-A10B",
+                ])
+        elif "gemma4" in repo:
             cmd.extend([
                 "--reasoning-parser", "gemma4",
                  "--language-model-only",
@@ -287,12 +373,19 @@ engine = VLLMEngine()
 image = (
     modal.Image.from_registry(
         engine.get_base_image(),
-        add_python="3.12",
+        add_python="3.12",    # NOTE(Kevin): this is the container Python environment. VLLM/SGLang/llama.cpp likely have their own Python environment and need to pip install it there
     )
     .entrypoint([])
     .uv_pip_install(
         "huggingface_hub>=1.0",
-        "requests==2.33.0",
+        # "requests==2.33.0",
+        "fastapi>=0.115",
+        "flashinfer-python==0.6.7.post3",
+        "flashinfer-cubin==0.6.7.post3",
+        "httpx>=0.27",
+    )
+    .run_commands(
+        "python -m pip install flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130"
     )
     .env({
         "HF_HOME": HF_CACHE_ROOT_PATH,
@@ -308,13 +401,153 @@ app = modal.App(f"{SERVED_MODEL_NAME}_{GPU_TYPE}".replace("/", ".").replace("+",
 @app.function(
     image=image,
     volumes=engine.volumes,
-    timeout=TIMEOUT_S,
+    timeout=PREWARM_TIMEOUT_S,
 )
 def prewarm_container():
     engine.prewarm_container()
 
 
+@app.cls(
+    image=image,
+    gpu=f"{GPU_TYPE}:{N_GPU}",
+    scaledown_window=SCALEDOWN_S,
+    timeout=TIMEOUT_S,
+    volumes=engine.volumes,
+)
+@modal.concurrent(max_inputs=MAX_NUM_SEQS)
+class Serve:
+    cmd: list[str]
+    proc: subprocess.Popen    # pyright: ignore[reportMissingTypeArgument]
+    upstream: str
+    client: httpx.AsyncClient
+    
+    @modal.enter()
+    async def start_engine(self):
+        self.cmd = engine.cmd()
+        print("Starting:", " ".join(self.cmd))
+        self.proc = subprocess.Popen(self.cmd)
 
+        self.upstream = f"http://127.0.0.1:{PORT}"
+        self.client = httpx.AsyncClient(
+            base_url=self.upstream,
+            timeout=None,
+            limits=httpx.Limits(
+                max_keepalive_connections=MAX_NUM_SEQS,
+                max_connections=max(MAX_NUM_SEQS * 2, 32),
+            ),
+        )
+
+        health_check_endpoint = engine.get_health_check_endpoint()
+        if health_check_endpoint is not None:
+            while True:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(
+                        f"{engine.__class__.__name__} exited early with code {self.proc.returncode}"
+                    )
+
+                try:
+                    print(
+                        f"Polling {engine.__class__.__name__} health check endpoint at {health_check_endpoint}..."
+                    )
+                    r = await self.client.get(health_check_endpoint, timeout=2.0)
+                    if r.status_code == 200:
+                        print(f"{engine.__class__.__name__} is healthy!")
+                        break
+                except Exception:
+                    pass
+
+                await asyncio.sleep(4)
+
+    @modal.exit()
+    async def stop_engine(self):
+        if hasattr(self, "client"):
+            await self.client.aclose()
+
+        if hasattr(self, "proc") and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                _ = await asyncio.to_thread(self.proc.wait, 10)
+            except Exception:
+                self.proc.kill()
+
+                _ = await asyncio.to_thread(self.proc.wait, 10)
+
+    @modal.asgi_app()
+    def app(self):
+        api = FastAPI()
+
+        hop_by_hop_headers = {
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailer",
+            "transfer-encoding",
+            "upgrade",
+            "host",
+            "content-length",
+        }
+
+        def filter_headers(headers: Mapping[str, str]) -> dict[str, str]:
+            return {
+                k: v
+                for k, v in headers.items()
+                if k.lower() not in hop_by_hop_headers
+            }
+
+        @api.api_route(
+            "/",
+            methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+        )
+        @api.api_route(
+            "/{path:path}",
+            methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+        )
+        async def proxy(request: Request, path: str = "") -> Response:    # pyright: ignore[reportUnusedFunction]
+            if not hasattr(self, "proc"):
+                return JSONResponse(
+                    {"error": f"{engine.__class__.__name__} has not yet initialized"},
+                    status_code=503,
+                )
+                
+            if self.proc.poll() is not None:
+                return JSONResponse(
+                    {"error": f"{engine.__class__.__name__} is not running"},
+                    status_code=503,
+                )
+
+            upstream_path = f"/{path}" if path else "/"
+            body = await request.body()
+
+            upstream_request = self.client.build_request(
+                method=request.method,
+                url=upstream_path,
+                params=request.query_params,
+                headers=filter_headers(request.headers),
+                content=body,
+            )
+
+            try:
+                upstream_response = await self.client.send(upstream_request, stream=True)   
+                response_headers = filter_headers(upstream_response.headers)
+                return StreamingResponse(
+                    upstream_response.aiter_raw(),
+                    status_code=upstream_response.status_code,
+                    headers=response_headers,
+                    background=BackgroundTask(upstream_response.aclose),
+                )
+            except httpx.RequestError as e:
+                return JSONResponse(
+                    {"error": f"Upstream request failed: {type(e).__name__}: {e}"},
+                    status_code=503,
+                )
+
+
+        return api
+
+
+"""
 @app.function(
     image=image,
     gpu=f"{GPU_TYPE}:{N_GPU}",
@@ -349,5 +582,6 @@ def serve():
             except Exception:
                 pass
 
-            time.sleep(4)
+            time.sleep(5)
 
+"""
