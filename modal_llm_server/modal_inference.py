@@ -62,6 +62,15 @@ import modal
 
 
 
+
+
+MODEL_REPO = "Qwen/Qwen3.5-27B-FP8"
+SERVED_MODEL_NAME = "Qwen/Qwen3.5-27B-FP8"
+MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=64
+
+
 """
 MODEL_REPO = "Qwen/Qwen3.5-122B-A10B-FP8"
 SERVED_MODEL_NAME = "Qwen/Qwen3.5-122B-A10B-FP8"
@@ -97,13 +106,29 @@ MAX_NUM_SEQS=64
 """
 
 
-
+"""
 MODEL_REPO = "nvidia/Qwen3.5-397B-A17B-NVFP4"
 SERVED_MODEL_NAME = "nvidia/Qwen3.5-397B-A17B-NVFP4"
 MODEL_FILE: str | None = None
 MAX_MODEL_LEN=32000
-MAX_NUM_SEQS=32
+MAX_NUM_SEQS=64
+"""
 
+"""
+MODEL_REPO = "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4"
+SERVED_MODEL_NAME = "Qwen/Qwen3.5-397B-A17B-GPTQ-Int4"
+MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=64
+"""
+
+"""
+MODEL_REPO = "QuantTrio/Qwen3.5-397B-A17B-AWQ"
+SERVED_MODEL_NAME = "QuantTrio/Qwen3.5-397B-A17B-AWQ"
+MODEL_FILE: str | None = None
+MAX_MODEL_LEN=32000
+MAX_NUM_SEQS=64
+"""
 
 
 
@@ -117,12 +142,14 @@ MAX_NUM_SEQS=32
 
 
 # INFRA CONFIG
-GPU_TYPE="B200+"
+# GPU_TYPE="B200+"
+#GPU_TYPE="H200"
 #GPU_TYPE="A100-80GB"
-N_GPU=2
+GPU_TYPE="A100-40GB"
+N_GPU=1
 PREWARM_TIMEOUT_S = 60 * 60  # how long should we wait for the prewarm function to complete?
-TIMEOUT_S = 20 * 60  # how long should we wait for container start?
-SCALEDOWN_S = 1 * 60  # how long should we stay up with no requests?
+TIMEOUT_S = 30 * 60  # how long should we wait for container start?
+SCALEDOWN_S = 8 * 60  # how long should we stay up with no requests?
 PORT = 8000
 
 """
@@ -266,7 +293,8 @@ class VLLMEngine(AbstractEngine):
             "--no-enforce-eager",
             "--max-model-len", f"{MAX_MODEL_LEN}",
             "--gpu-memory-utilization", "0.93",
-            "--max-num-batched-tokens", "16384",
+            "--max-num-batched-tokens", "8192",
+            # "--max-num-batched-tokens", "16384",
             "--max-num-seqs", f"{MAX_NUM_SEQS}",
             "--enable-prefix-caching",
             "--generation-config", "vllm",
@@ -373,7 +401,7 @@ engine = VLLMEngine()
 image = (
     modal.Image.from_registry(
         engine.get_base_image(),
-        add_python="3.12",    # NOTE(Kevin): this is the container Python environment. VLLM/SGLang/llama.cpp likely have their own Python environment and need to pip install it there
+        add_python="3.12",    # NOTE(Kevin): this is the container's Python environment. VLLM/SGLang/llama.cpp likely have their own separate Python environment
     )
     .entrypoint([])
     .uv_pip_install(

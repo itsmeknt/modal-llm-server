@@ -1,14 +1,11 @@
-Deploy via: 
+(One-time setup): Build image and download model files:
+
 ```bash
-modal deploy modal_llm_server/vllm_inference.py
+modal run modal_llm_server/modal_inference.py::prewarm_container
 ```
 
-B200
-VLLM
-~11 minutes ~ $1/run
-peak PP: 6,000
-peak TG: 3,300
+Then deploy via:
 
-SGLANG
-peak PP: 33,500
-peak TG: 3,500
+```bash
+modal deploy modal_llm_server/modal_inference.py
+```
