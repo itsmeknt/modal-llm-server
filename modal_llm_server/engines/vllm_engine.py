@@ -136,19 +136,6 @@ class VLLMEngine(AbstractSnapshottableEngine):
     @override
     def get_health_check_endpoint(self) -> str | None:
         return f"/health"
-
-    @override
-    def get_blocked_admin_paths(self) -> set[str]:
-        return {
-          "sleep",
-          "wake_up",
-          "is_sleeping",
-          "collective_rpc",
-          "server_info",
-          "reset_prefix_cache",
-          "reset_mm_cache",
-          "reset_encoder_cache",
-      }
     
     @override
     def get_sleep_endpoint(self) -> str:

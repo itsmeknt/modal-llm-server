@@ -70,10 +70,6 @@ class AbstractEngine(ABC):
     @abstractmethod
     def get_health_check_endpoint(self) -> str | None:
         raise NotImplementedError()
-
-    @abstractmethod
-    def get_blocked_admin_paths(self) -> set[str]:
-        raise NotImplementedError()
     
     def _download_model_file(self) -> None:
         """

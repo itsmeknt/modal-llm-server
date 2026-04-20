@@ -81,8 +81,4 @@ class LlamaCPPEngine(AbstractEngine):
     @override
     def get_health_check_endpoint(self) -> str | None:
         return f"/health"
-
-    @override
-    def get_blocked_admin_paths(self) -> set[str]:
-        return set()
     

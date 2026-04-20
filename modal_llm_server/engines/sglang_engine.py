@@ -144,15 +144,6 @@ class SGLangEngine(AbstractSnapshottableEngine):
         return f"/health"
 
     @override
-    def get_blocked_admin_paths(self) -> set[str]:
-        # minimum set for your public reverse proxy
-        return {
-            "release_memory_occupation",
-            "resume_memory_occupation",
-            "server_info",
-        }
-
-    @override
     def get_sleep_endpoint(self) -> str:
         return "/release_memory_occupation"
 

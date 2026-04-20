@@ -17,13 +17,20 @@ class Config:
     port: int
 
 
-@dataclass
 class Globals:
     HF_CACHE_ROOT_PATH: Final[str] = f"/root/.cache/huggingface"
     PREWARM_TIMEOUT_S: Final[int] = 60 * 60  # how long should we wait for the prewarm function to complete?
     TIMEOUT_S: Final[int] = 30 * 60  # how long should we wait for container start?
     SCALEDOWN_S: Final[int] = 8 * 60  # how long should we stay up with no requests?
-    
+
+    ALLOWED_ROUTES: Final[dict[str, set[str]]] = {
+        "/v1/models": {"GET", "HEAD", "OPTIONS"},
+        "/v1/chat/completions": {"POST", "OPTIONS"},
+    }
+
+    # For now, hardcode it. Later on, read it from an .env file
+    API_KEYS: Final[list[str] | None] = None
+
     
 def get_active_config() -> Config:
     return QWEN3_5_122B_SEHYO_NVFP4
