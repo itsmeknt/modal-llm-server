@@ -3,19 +3,23 @@
 """
 (One-time setup): Build image and download model files:
 
-modal run modal_llm_server/modal_inference.py::prewarm_container
+modal run modal_llm_server/modal_snapshot_inference.py::prewarm_container
 
 Then deploy via:
 
-modal deploy modal_llm_server/modal_inference.py
+modal deploy modal_llm_server/modal_snapshot_inference.py
 """
 
 # TODO(Kevin): Modal single-GPU memory snapshots
 
 
+from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import Mapping
+import os
+from pathlib import PurePosixPath
 import subprocess
+from typing import Any, ClassVar, Final, override
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -37,7 +41,7 @@ if CONFIG.engine == "vllm":
 elif CONFIG.engine == "sglang":
     engine = SGLangEngine(CONFIG)
 elif CONFIG.engine == "llamacpp":
-    engine = LlamaCPPEngine(CONFIG)
+    raise RuntimeError(f"llamacpp not supported for snapshottable Modal instance!")
 else:
     raise NotImplementedError(f"Config engine {CONFIG.engine} not yet implemented!")
 
@@ -77,6 +81,10 @@ def prewarm_container():
     scaledown_window=Globals.SCALEDOWN_S,
     timeout=Globals.TIMEOUT_S,
     volumes=engine.volumes,
+    
+    # turn on snapshots
+    enable_memory_snapshot=True,
+    experimental_options={"enable_gpu_snapshot": True},
 )
 @modal.concurrent(max_inputs=engine.config.max_num_seqs)
 class Serve:
@@ -122,10 +130,18 @@ class Serve:
             r = await self.client.post(engine.get_warmup_endpoint(), json=engine.get_warmup_payload(), timeout=180.0)
             _ = r.raise_for_status()
             _ = r.json()
+            
+    async def _sleep_server(self) -> None:
+        r = await self.client.post(engine.get_sleep_endpoint(), **engine.get_sleep_request_kwargs(), timeout=300.0)
+        _ = r.raise_for_status()
 
-    
-    @modal.enter()
-    async def start_engine(self):
+    async def _wake_server(self) -> None:
+        r = await self.client.post(engine.get_wake_endpoint(), **engine.get_wake_request_kwargs(), timeout=300.0)
+        _ = r.raise_for_status()
+        await self._wait_ready()
+        
+    @modal.enter(snap=True)
+    async def start_engine_and_snapshot(self):
         self.cmd = engine.cmd()
         self.upstream = f"http://127.0.0.1:{engine.config.port}"
 
@@ -135,6 +151,17 @@ class Serve:
         self.client = self._new_client()
         await self._wait_ready()
         await self._warmup()
+        
+        await self._sleep_server()
+        # do not carry a live client socket pool into restore
+        await self.client.aclose()
+        
+    @modal.enter(snap=False)
+    async def wake_after_restore(self):
+        self.upstream = f"http://127.0.0.1:{engine.config.port}"
+        self.client = self._new_client()
+        await self._wake_server()
+        
 
     @modal.exit()
     async def stop_engine(self):
@@ -194,10 +221,10 @@ class Serve:
                     {"error": f"{engine.__class__.__name__} is not running"},
                     status_code=503,
                 )
-            
+
             if path.lstrip("/") in engine.get_blocked_admin_paths():
                 return JSONResponse({"error": "not found"}, status_code=404)
-
+            
             upstream_path = f"/{path}" if path else "/"
             body = await request.body()
 
@@ -226,3 +253,4 @@ class Serve:
 
 
         return api
+
