@@ -86,9 +86,8 @@ class VLLMEngine(AbstractSnapshottableEngine):
             cmd.extend([
                 "--reasoning-parser", "qwen3",
                 "--language-model-only",
-                # "--enable-auto-tool-choice",
-                # "--tool-call-parser", "qwen3_coder",
-                # "--speculative-config", "{\"method\":\"mtp\",\"num_speculative_tokens\":1}",
+                "--enable-auto-tool-choice",
+                "--tool-call-parser", "qwen3_coder",
             ])
 
             if "nvfp4" not in repo:
