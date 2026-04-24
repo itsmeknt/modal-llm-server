@@ -33,7 +33,7 @@ class Globals:
 
     
 def get_active_config() -> Config:
-    return QWEN3_5_122B_SEHYO_NVFP4
+    return QWEN3_5_122B_SEHYO_NVFP4_AGENT
 
 
 GEMMA4_31B_BF16 = Config(
@@ -111,6 +111,19 @@ QWEN3_5_122B_SEHYO_NVFP4 = Config(
     port=8000,
 )
 
+QWEN3_5_122B_SEHYO_NVFP4_AGENT = Config(
+    model_repo="Sehyo/Qwen3.5-122B-A10B-NVFP4",
+    served_model_name="Sehyo/Qwen3.5-122B-A10B-NVFP4",
+    model_file=None,
+    gpu_type="B200+",
+    #gpu_type="H200",
+    #gpu_type="A100-80GB",
+    n_gpu=1,
+    max_model_len=262144,
+    max_num_seqs=4,
+    engine="vllm",
+    port=8000,
+)
 
 QWEN3_5_397B_NVFP4 = Config(
     model_repo="nvidia/Qwen3.5-397B-A17B-NVFP4",
